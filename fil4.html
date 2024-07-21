@@ -56,7 +56,7 @@
     <script src="https://d3js.org/d3.v6.min.js"></script>
     <script>
         const temperatureDataUrl = 'https://raw.githubusercontent.com/datasets/global-temp/master/data/monthly.csv';
-        const gdpDataUrl = 'http://api.worldbank.org/v2/countries/all/indicators/NY.GDP.MKTP.CD?format=json&per_page=5000';
+        const gdpDataUrl = 'https://api.worldbank.org/v2/countries/all/indicators/NY.GDP.MKTP.CD?format=json&per_page=5000';
 
         Promise.all([
             d3.csv(temperatureDataUrl),
