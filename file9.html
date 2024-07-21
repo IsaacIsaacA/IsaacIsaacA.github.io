@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Narrative Visualization with Drill-Down</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+        #narrative {
+            width: 80%;
+            max-width: 800px;
+            background: white;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #slides {
+            margin-top: 20px;
+        }
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            width: auto;
+            height: auto;
+            padding: 10px;
+            background: lightsteelblue;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+        .detail-view {
+            display: none;
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="narrative">
+        <h1>Global Temperature Change and Industrial GDP Growth</h1>
+        <div id="slides"></div>
+        <div id="detailView" class="detail-view"></div>
+    </div>
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <script>
+        const temperatureDataUrl = 'https://raw.githubusercontent.com/datasets/global-temp/master/data/monthly.csv';
+        const gdpDataUrl = 'https://api.worldbank.org/v2/countries/all/indicators/NY.GDP.MKTP.CD?format=json&per_page=5000';
+
+        Promise.all([
+            d3.csv(temperatureDataUrl),
+            d3.json(gdpDataUrl)
+        ]).then(([tempData, gdpData]) => {
+            tempData = tempData.map(d => ({
+                year: +d.Date.split('-')[0],
+                month: +d.Date.split('-')[1],
+                mean: +d['Mean']
+            })).filter(d => d.year >= 1880);
+
+            gdpData = gdpData[1].filter(d => d.countryiso3code === 'WLD').map(d => ({
+                year: +d.date,
+                gdp: +d.value
+            })).filter(d => d.year >= 1880);
+
+            const yearlyTempData = d3.rollups(tempData, v => d3.mean(v, d => d.mean), d => d.year)
+                                     .map(([year, mean]) => ({ year, mean }));
+
+            const events = {
+                1880: 'Beginning of modern record.',
+                1940: 'Post World War II industrial boom.',
+                1980: 'Sharp rise in temperatures.',
+                2020: 'Current state.'
+            };
+
+            const eventDetails = {
+                1880: 'The year 1880 marks the beginning of modern temperature records.',
+                1940: 'Post World War II industrial boom led to significant environmental changes.',
+                1980: 'The 1980s saw a sharp rise in global temperatures due to increased greenhouse gas emissions.',
+                2020: 'The current state of global warming with unprecedented temperature levels.'
+            };
+
+            const industrialGrowthData = {
+                1880: tempData.filter(d => d.year >= 1880 && d.year < 1900),
+                1940: tempData.filter(d => d.year >= 1940 && d.year < 1960),
+                1980: tempData.filter(d => d.year >= 1980 && d.year < 2000),
+                2020: tempData.filter(d => d.year >= 2000 && d.year <= 2020)
+            };
+
+            const margin = { top: 20, right: 30, bottom: 30, left: 40 };
+            const width = 800 - margin.left - margin.right;
+            const height = 400 - margin.top - margin.bottom;
+
+            const svg = d3.select('#slides').append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom)
+                .append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const x = d3.scaleLinear()
+                .domain(d3.extent(yearlyTempData, d => d.year))
+                .range([0, width]);
+
+            const yTemp = d3.scaleLinear()
+                .domain([d3.min(yearlyTempData, d => d.mean), d3.max(yearlyTempData, d => d.mean)])
+                .nice()
+                .range([height, 0]);
+
+            const yGDP = d3.scaleLinear()
+                .domain([d3.min(gdpData, d => d.gdp), d3.max(gdpData, d => d.gdp)])
+                .nice()
+                .range([height, 0]);
+
+            svg.append('g')
+                .attr('transform', `translate(0,${height})`)
+                .call(d3.axisBottom(x));
+
+            svg.append('g')
+                .call(d3.axisLeft(yTemp));
+
+            svg.append('path')
+                .datum(yearlyTempData)
+                .attr('fill', 'none')
+                .attr('stroke', 'steelblue')
+                .attr('stroke-width', 1.5)
+                .attr('d', d3.line()
+                    .x(d => x(d.year))
+                    .y(d => yTemp(d.mean)));
+
+            svg.append('path')
+                .datum(gdpData)
+                .attr('fill', 'none')
+                .attr('stroke', 'green')
+                .attr('stroke-width', 1.5)
+                .attr('d', d3.line()
+                    .x(d => x(d.year))
+                    .y(d => yGDP(d.gdp)));
+
+            const tooltip = d3.select('body').append('div')
+                .attr('class', 'tooltip')
+                .style('opacity', 0);
+
+            svg.selectAll('circle')
+                .data(Object.keys(events))
+                .enter().append('circle')
+                .attr('cx', d => x(d))
+                .attr('cy', d => {
+                    const yearlyDatum = yearlyTempData.find(yd => yd.year == d);
+                    return yearlyDatum ? yTemp(yearlyDatum.mean) : height / 2;
+                })
+                .attr('r', 5)
+                .attr('fill', 'red')
+                .on('mouseover', function(event, d) {
+                    d3.select(this).attr('r', 10);
+                    tooltip.transition()
+                        .duration(200)
+                        .style('opacity', .9);
+                    tooltip.html(events[d])
+                        .style('left', (event.pageX + 5) + 'px')
+                        .style('top', (event.pageY - 28) + 'px');
+                })
+                .on('mouseout', function(d) {
+                    d3.select(this).attr('r', 5);
+                    tooltip.transition()
+                        .duration(500)
+                        .style('opacity', 0);
+                })
+                .on('click', function(event, d) {
+                    d3.select('#detailView')
+                        .style('display', 'block')
+                        .html(`<strong>${d}</strong>: ${eventDetails[d]}`);
+                    showDrillDown(d);
+                });
+
+            // Add annotations
+            svg.selectAll('text.annotation')
+                .data(Object.keys(events))
+                .enter().append('text')
+                .attr('class', 'annotation')
+                .attr('x', d => x(d) + 5)
+                .attr('y', d => {
+                    const yearlyDatum = yearlyTempData.find(yd => yd.year == d);
+                    return yearlyDatum ? yTemp(yearlyDatum.mean) - 10 : height / 2;
+                })
+                .text(d => events[d])
+                .style('font-size', '10px')
+                .style('fill', 'black');
+
+            function showDrillDown(year) {
+                d3.select('#detailView').html('');
+
+                const drillDownTempData = industrialGrowthData[year];
+                const drillDownGDPData = gdpData.filter(d => d.year >= Math.min(...drillDownTempData.map(d => d.year)) && d.year <= Math.max(...drillDownTempData.map(d => d.year)));
+
+                const drillDownSvg = d3.select('#detailView').append('svg')
+                    .attr('width', width + margin.left + margin.right)
+                    .attr('height', height + margin.top + margin.bottom)
+                    .append('g')
+                    .attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const xDrill = d3.scaleLinear()
+                    .domain(d3.extent(drillDownTempData, d => d.year + d.month / 12))
+                    .range([0, width]);
+
+                const yDrillTemp = d3.scaleLinear()
+                    .domain([d3.min(drillDownTempData, d => d.mean), d3.max(drillDownTempData, d => d.mean)])
+                    .nice()
+                    .range([height, 0]);
+
+                const yDrillGDP = d3.scaleLinear()
+                    .domain([d3.min(drillDownGDPData, d => d.gdp), d3.max(drillDownGDPData, d => d.gdp)])
+                    .nice()
+                    .range([height, 0]);
+
+                drillDownSvg.append('g')
+                    .attr('transform', `translate(0,${height})`)
+                    .call(d3.axisBottom(xDrill).tickFormat(d3.format("d")));
+
+                drillDownSvg.append('g')
+                    .call(d3.axisLeft(yDrillTemp));
+
+                drillDownSvg.append('path')
+                    .datum(drillDownTempData)
+                    .attr('fill', 'none')
+                    .attr('stroke', 'orange')
+                    .attr('stroke-width', 1.5)
+                    .attr('d', d3.line()
+                        .x(d => xDrill(d.year + d.month / 12))
+                        .y(d => yDrillTemp(d.mean)));
+
+                drillDownSvg.append('path')
+                    .datum(drillDownGDPData)
+                    .attr('fill', 'none')
+                    .attr('stroke', 'green')
+                    .attr('stroke-width', 1.5)
+                    .attr('d', d3.line()
+                        .x(d => xDrill(d.year))
+                        .y(d => yDrillGDP(d.gdp)));
+
+                // Add single annotation for drill-down in 1899
+                drillDownSvg.append('text')
+                    .attr('class', 'annotation')
+                    .attr('x', xDrill(1899))
+                    .attr('y', yDrillTemp(d3.mean(drillDownTempData, d => d.mean)) - 20)
+                    .text('1899: Beginning of British Industrial Growth')
+                    .style('font-size', '12px')
+                    .style('fill', 'black');
+            }
+
+            d3.select('#slides').append('div').attr('id', 'slideText').style('margin-top', '20px');
+        }).catch(error => {
+            console.error('Error loading or processing data:', error);
+        });
+    </script>
+</body>
+</html>
